@@ -1,27 +1,28 @@
 package com.project3.cis520.marblegame;
 
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.Paint;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
-import android.support.v7.app.ActionBarActivity;
+import android.media.Ringtone;
+import android.media.RingtoneManager;
+import android.net.Uri;
 import android.os.Bundle;
-import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.WindowManager;
-
-import java.sql.Time;
-import java.text.SimpleDateFormat;
-import java.util.Calendar;
+import android.widget.Toast;
 
 
 public class MarbleGame extends Activity implements SensorEventListener {
@@ -36,6 +37,9 @@ public class MarbleGame extends Activity implements SensorEventListener {
     private float move_x;
     private float move_y;
 
+    Uri notification;
+    Ringtone alarm;
+
     long lastSensorTime;
 
     @Override
@@ -49,6 +53,11 @@ public class MarbleGame extends Activity implements SensorEventListener {
         sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
         accelerometer = sensorManager.getDefaultSensor(accelerometer.TYPE_ACCELEROMETER);
         sensorManager.registerListener(this, accelerometer , SensorManager.SENSOR_DELAY_NORMAL);
+        registerReceiver(killActivity, new IntentFilter("kill"));
+        notification = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
+        alarm = RingtoneManager.getRingtone(getApplicationContext(), notification);
+
+        //startService(new Intent(getBaseContext(), TimingService.class));
     }
 
     @Override
@@ -109,6 +118,20 @@ public class MarbleGame extends Activity implements SensorEventListener {
 
     }
 
+    public final BroadcastReceiver killActivity = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            alarm.play();
+            finish();
+        }
+    };
+
+    @Override
+    public void onDestroy(){
+        unregisterReceiver(killActivity);
+        super.onDestroy();
+    }
+
     class GameSurfaceView extends SurfaceView implements Runnable{
 
         SurfaceHolder surfaceHolder;
@@ -117,7 +140,8 @@ public class MarbleGame extends Activity implements SensorEventListener {
 
         private Ball ball;
 
-        private Maze maze;
+        private DisjointMaze maze;
+        private MazeDrawer mazeDrawer;
 
         public GameSurfaceView(Context context){
             super(context);
@@ -137,6 +161,7 @@ public class MarbleGame extends Activity implements SensorEventListener {
 
                 elapsedTime += curTimeInMilli - lastTimeInMilli;
 
+
                 if(surfaceHolder.getSurface().isValid()){
 
                     Canvas canvas = surfaceHolder.lockCanvas();
@@ -148,23 +173,34 @@ public class MarbleGame extends Activity implements SensorEventListener {
                     }
 
                     if(ball == null){
+                        int size = 50;
                         int width = canvas.getWidth();
                         int height = canvas.getHeight();
-
-                        maze = new Maze(width, height);
-                        ball = new Ball(width, height, maze);
+                        maze = new MazeGenerator().Generate(height, width, size);
+                        mazeDrawer = new MazeDrawer(maze, size, canvas);
+                        ball = new Ball(width, height, mazeDrawer);
                     }
 
                     if(elapsedTime >= TIMESTEP) {
+                        this.buildDrawingCache();
                         ball.update(move_x, move_y);
+                        if(ball.isMoving){
+                            stopService(new Intent(getBaseContext(), TimingService.class));
+                            startService(new Intent(getBaseContext(), TimingService.class));
+                        }
                         elapsedTime = 0;
                     }
-                    maze.render(canvas);
+                    mazeDrawer.render(canvas);
                     ball.render(canvas);
 
 
                     surfaceHolder.unlockCanvasAndPost(canvas);
+
+                if(ball.hasWon){
+                    startService(new Intent(getBaseContext(), MessageService.class));
+                    finish();
                 }
+            }
 
                 lastTimeInMilli = System.currentTimeMillis();
             }
